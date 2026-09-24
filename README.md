@@ -1,78 +1,79 @@
-# Pip Example
+# PyPI + JFrog CLI GitHub Actions 示例
 
-## Overview
-This example demonstrates how to build a Python Pip project with Artifactory, while collecting build-info.
+基于测试项目 [gyzong1/pypi-example](https://github.com/gyzong1/pypi-example)，用 JFrog CLI 完成：
 
-## Before Running the Example
-### Set Up the Environment 
-1. Make sure **Python** is installed and the **python** command is in your PATH.
-2. Install **pip**. You can use the [Pip Documentation](https://pip.pypa.io/en/stable/installing/) and also [Installing packages using pip and virtual environments](https://packaging.python.org/guides/installing-using-pip-and-virtual-environments/)
-3. Create three Pypi repositories in Artifactory - a local, remote and a virtual repository. You can use the [PyPi Repositories Documentation](https://www.jfrog.com/confluence/display/RTF/PyPI+Repositories).
-* The remote repository should proxy *https://files.pythonhosted.org* (the default when creating a Pypi remote repository). 
-* Name the virtual repository *pypi*.
-* The virtual repository should include the remote repository.
-* The virtual repository should have the local repository set as the *Default Deployment Repository*.
-4. Make sure **wheel** and **setuptools** are installed. You can use the [Installing Packages Documentation](https://packaging.python.org/tutorials/installing-packages/).
-5. Make sure version 1.28.0 or above of [JFrog CLI](https://jfrog.com/getcli/) is installed.
+1. **构建并上传**至 Artifactory
+2. **搜集并发布** Build Info
+3. **扫描** Build（Xray）
 
-### Validate the Setup
-In your terminal, validate that the following commands work.
-```console
-Output Python version:
-> python --version
+示例工作流文件：`.github/workflows/pypi.yml`
 
-Output pip version:
-> pip --version
+## 使用方法
 
-Verify wheel is installed:
-> wheel -h
+将 `pypi.yml` 复制到目标仓库：
 
-Verify setuptools is installed:
-> pip show setuptools
-
-Verify that virtual-environment is activated:
-> echo $VIRTUAL_ENV
-
-Output JFrog CLI version:
-> jf --version
+```text
+.github/workflows/pypi.yml
 ```
 
-## Running the Example
-'cd' to the root project directory
+### Github 仓库配置
 
-```console
-Configure Artifactory:
-> jf c add --url=<JFROG_PLATFORM_URL> [credentials flags]
 
-Configure the project's resolution repository. You shoud set the virtual repository you created.
-> jf pip-config --repo-resolve=<PYPI_REPO>
+| 类型       | 名称                | 说明                                           |
+| -------- | ----------------- | -------------------------------------------- |
+| Variable | `JF_URL`          | JFrog Platform URL，如 `https://acme.jfrog.io` |
+| Secret   | `JF_ACCESS_TOKEN` | 需具备 Deploy / Build Info / Xray Scan 权限       |
 
-Install project dependencies with pip from Artifactory:
 
-Using Setup.py:
-> jf pip install . --build-name=my-pip-build --build-number=1 --module=jfrog-python-example
- OR
-Using requirements.txt:
-> jf pip install -r requirements.txt --build-name=my-pip-build --build-number=1 --module=jfrog-python-example
+### Artifactory 仓库配置
 
-Package the project, create distribution archives (tar.gz and whl):
-> python setup.py sdist bdist_wheel
+流水线通过 `PYPI_REPO_RESOLVE` / `PYPI_REPO_DEPLOY` 指向 Pypi 仓库（默认使用同一个 virtual）。请先在 Artifactory 中创建以下 **Pypi** 类型仓库：
 
-Upload the packages to the pypi repository in Artifactory:
-> jf rt u dist/ pypi/ --build-name=my-pip-build --build-number=1 --module=jfrog-python-example
 
-Collect environment variables and add them to the build info:
-> jf rt bce my-pip-build 1
+| 类型      | 示例名称                        | 说明                                                               |
+| ------- | --------------------------- | ---------------------------------------------------------------- |
+| Local   | `guoyz-github-pypi-local`   | 存放本流水线发布的 Python 包                                                |
+| Remote  | `guoyz-github-pypi-remote`  | 代理 PyPI，URL 为 `https://files.pythonhosted.org`                  |
+| Virtual | `guoyz-github-pypi-virtual` | 聚合上述 local + remote；**Default Deployment Repository** 指向对应 local |
 
-Publish the build info to Artifactory:
-> jf rt bp my-pip-build 1
 
-Install published package by installing it from Artifactory using pip:
-> jf pip install jfrog-python-example
+说明：
 
-Validate package successfully installed:
-> pip show jfrog-python-example
-```
+流水线中使用了 build-scan, 需将相关仓库和 build 加入 **Xray Indexed Resources**，以便 `jf build-scan` 可扫描依赖与制品。
 
-Learn about [Building Python Packages with JFrog CLI](https://www.jfrog.com/confluence/display/CLI/CLI+for+JFrog+Artifactory#CLIforJFrogArtifactory-BuildingPythonPackages).
-# pypi-example
+### 可调环境变量
+
+
+| 变量                       | 默认值                         | 说明                          |
+| ------------------------ | --------------------------- | --------------------------- |
+| `JFROG_CLI_BUILD_NAME`   | `guoyz-github-pypi-example` | Build 名称                    |
+| `JFROG_CLI_BUILD_NUMBER` | `${{ github.run_number }}`  | Build 编号                    |
+| `JFROG_CLI_MODULE`       | `jfrog-python-example`      | Build Info module（对应包名）     |
+| `PYPI_REPO_RESOLVE`      | `guoyz-github-pypi-virtual` | 解析仓库                        |
+| `PYPI_REPO_DEPLOY`       | `guoyz-github-pypi-virtual` | 部署仓库                        |
+
+
+## 核心 JFrog CLI 步骤
+
+
+| 步骤            | 命令                                                                  |
+| ------------- | ------------------------------------------------------------------- |
+| 配置 pip 仓库     | `jf pip-config`                                                     |
+| 安装依赖并记录       | `jf pip install -r requirements.txt --build-name/--build-number`    |
+| 打包            | `python -m build`                                                   |
+| 发布包并记录        | `jf twine upload dist/* --build-name/--build-number`                |
+| 搜集环境信息        | `jf rt build-collect-env`                                           |
+| 搜集 Git 信息     | `jf rt build-add-git`                                               |
+| 发布 Build Info | `jf rt build-publish`                                               |
+| 扫描 Build      | `jf build-scan`                                                     |
+
+
+与 [pypi-example README](https://github.com/gyzong1/pypi-example) 的差异：上传改用官方推荐的 `jf twine upload`（替代 `python setup.py sdist bdist_wheel` + `jf rt u dist/`），效果等价且与 `jf pip-config` 的 deploy 仓库配置一致。
+
+## 参考链接
+
+- [安装 JFrog CLI](https://docs.jfrog.com/integrations/docs/download-and-install-the-jfrog-cli)
+- [JFrog CLI 快速开始](https://docs.jfrog.com/integrations/docs/jfrog-cli-quick-start)
+- [JFrog CLI 文档总览](https://docs.jfrog.com/integrations/docs/jfrog-cli)
+- [jf pip 命令说明](https://docs.jfrog.com/artifactory/docs/jf-pip)
+- [jf twine 命令说明](https://docs.jfrog.com/artifactory/docs/jf-twine)
